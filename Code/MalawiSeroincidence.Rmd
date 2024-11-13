@@ -1,0 +1,287 @@
+---
+title: 'Estimating STRATAA Seroincidence: Malawi'
+author: "Jo Walker"
+date: "11/13/2024"
+output: html_document
+---
+
+
+```{r,echo = F, message = F}
+knitr::opts_chunk$set(echo = F, warning = F)
+
+#load("~/Downloads/ptcomb.Rdata")
+require(ggplot2)
+require(cowplot)
+library(knitr)
+library(readxl)
+library(doBy)
+library(mixtools)
+library(tidyverse)
+library(tidyr)
+library(RColorBrewer)
+library(Hmisc)
+library("PerformanceAnalytics")
+library("flexmix")
+theme_set(theme_cowplot())
+options(scipen=10000)
+
+location = "~/Typhoid-Seroincidence/"
+  
+Data = read.csv(paste0(location,"Input Data/Malawi_Data.csv"))
+
+Data$Age.Group = factor(Data$Age.Group, 
+                        levels = c("0-4y", "5-9y",
+                                   "10-14y", "15-29y",
+                                   "30+"))
+
+census<-data.frame(
+  agegrp=seq(1,5,1),
+  agegrpf = c("0-4y" ,"5-9y", "10-14y", "15-29y","30+"),
+  pop = c(12673, 12784, 12991, 31893, 21666+5385)
+)
+
+census$prop<-census$pop/sum(census$pop)
+census$pop100k = 100e3*census$prop
+```
+
+```{r,include=T,cache = T}
+
+dAll = list()
+observation.pairs = c()
+total.person.time = c()
+mean.person.time = c()
+
+Seroincidence = 
+  expand.grid(Antigen =
+               unique(Data$Antigen), 
+              observation.pairs = NA,
+              number.increasing.Zscore = NA,
+              number.increasing.Raw = NA,
+              total.person.time = NA)
+
+MixModels = list()
+cluster.change = list()
+
+for(i in unique(Data$Antigen))
+{
+  dAll[[i]] = Data %>% 
+    filter(Antigen == i) %>% 
+    arrange(Age.Group)
+  
+  observation.pairs[i] = nrow(dAll[[i]])
+  total.person.time[i] = sum(dAll[[i]][,"Days.Between.Samples"])
+  mean.person.time[i] =
+    total.person.time[i]/observation.pairs[i]
+  
+  MixModels[[i]] = 
+    flexmix(Change.Standardized.logFI ~ Standardized.logFI.v1 , 
+              data = dAll[[i]], 
+            k = 2)
+  
+  dAll[[i]][,"P.Change"] = 
+    MixModels[[i]]@posterior$scaled[,MixModels[[i]]@cluster[which.max(dAll[[i]]$Change.Standardized.logFI)]]
+ 
+  cluster.change[[i]] = 
+    ifelse(dAll[[i]][,"P.Change"] > 0.5,
+           "change","stable")
+  
+
+  dAll[[i]][,"Increasing"] =
+    as.numeric(cluster.change[[i]]=="change" & dAll[[i]][,"Change.Standardized.logFI"] > 0)
+  
+  dAll[[i]][,"Decreasing"] =
+    as.numeric(cluster.change[[i]]=="change" & dAll[[i]][,"Change.Standardized.logFI"] <  0)
+  
+  dAll[[i]][,"Stable"] =
+    as.numeric(cluster.change[[i]]=="stable")
+  
+  dAll[[i]][,"P.Inc"] =
+    dAll[[i]][,"P.Change"]*(dAll[[i]][,"Change.Standardized.logFI"]>0)
+  
+  Seroincidence$total.person.time[which(Seroincidence$Antigen==i)] = 
+    total.person.time[i]
+  
+  Seroincidence$observation.pairs[which(Seroincidence$Antigen==i)] = 
+    observation.pairs[i]
+  
+  Seroincidence$number.increasing[which(Seroincidence$Antigen==i)] = 
+    sum(dAll[[i]][,"Increasing"])
+  
+}
+
+Seroincidence
+```
+
+```{r}
+
+lambda.est = 
+  function(d,p,
+           indicator = F, 
+           Age.Group,
+           nchains = 3,
+           niter = 10000,
+           burnin = 1000,
+           Plot = F)
+  {
+
+  
+  observation.days = d$Days.Between.Samples
+  
+  if(indicator)
+    {
+    p[which(p<0.5)] = 0
+    p[which(p>0.5)] = 1 
+    }
+  
+
+    p=p[which(d$Age.Group %in% Age.Group)]
+    observation.days=observation.days[which(d$Age.Group %in% Age.Group)]
+  
+  lambda.samples = matrix(0, nrow = niter, ncol = nchains)
+  accept = matrix(0, nrow = niter, ncol = nchains)
+  negative.proposal = matrix(0, nrow = niter, ncol = nchains)
+
+  for(chains in 1:nchains)
+    {
+  set.seed(chains)
+  current.lambda = runif(1,0,5)
+  current.log.prior = 
+    dgamma(current.lambda,shape = 0.001,rate = 0.001,log = T) 
+  current.log.likelihood =   
+    sum(log(p*pexp(observation.days/365.25,current.lambda) + 
+              (1-p)*pexp(observation.days/365.25,current.lambda,lower.tail = F)))
+proposal.variance = 0.1
+
+  for(i in 1:niter)
+    {
+ set.seed(i*chains)
+ proposed.lambda = current.lambda + rnorm(1,0,proposal.variance)
+ negative.proposal[i,chains] = ifelse(proposed.lambda<0, 1, 0) 
+ proposed.lambda = ifelse(proposed.lambda>0,proposed.lambda,current.lambda)
+
+ proposed.log.prior = dgamma(proposed.lambda,  shape = 0.001,rate = 0.001,log = T) 
+
+ proposed.log.likelihood = sum(log(p*pexp(observation.days/365.25,proposed.lambda,log.p=F) + (1-p)*pexp(observation.days/365.25,proposed.lambda,log.p=F,lower.tail = F)))
+ 
+ proposal.ratio = exp(proposed.log.likelihood + proposed.log.prior -
+                        current.log.likelihood - current.log.prior)
+ 
+ set.seed(i*chains*2)
+ if(runif(1)<proposal.ratio)
+  {
+   current.lambda = proposed.lambda
+   current.log.prior = proposed.log.prior
+   current.log.likelihood = proposed.log.likelihood
+   accept[i,chains] = 1
+  }
+
+ lambda.samples[i,chains] = current.lambda
+ 
+}
+  }
+  
+  if(Plot)
+    {
+    
+    plot(lambda.samples[,1],type = "l",ylim = c(0,4),
+     xlim = c(0,niter),
+     las = 1,xlab = "Iteration",
+     ylab = "Lambda",
+     main = "",
+     col = "red")
+
+    lines(lambda.samples[,2],type ="l",col = "purple")
+    lines(lambda.samples[,3],type ="l",col = "darkgreen")
+    legend("topright",
+       fill = c("red","purple","darkgreen"),
+       legend = 1:chains,
+       title = "Chain")
+
+    abline(v = burnin,lty = 2)
+    }
+  
+  return(quantile(lambda.samples[(burnin+1):niter,],c(0.5,0.025,0.975)))
+  }
+
+```
+
+```{r,cache=TRUE}
+
+MCMC.Estimates = 
+  expand.grid(Antigen =
+                unique(Data$Antigen),
+              Infection.Data.Type =
+                c("Indicator","Probability"),
+              Age.Group =
+                sort(unique(Data$Age.Group)),
+              Max.Delay = 
+                c(100, 150),
+              Median = NA,
+              Lower = NA,
+              Upper = NA)
+
+for(k in 1:nrow(MCMC.Estimates))
+  {
+
+  dataset = dAll[[as.character(MCMC.Estimates$Antigen[k])]] %>% 
+    filter(Days.Between.Samples <= MCMC.Estimates$Max.Delay[k])
+    
+  P = dataset$P.Inc
+  
+  
+  MCMC.Estimates[k,c("Median","Lower","Upper")] =
+      1e5*as.numeric(
+        lambda.est(d=dataset,
+                   p=P,
+                   indicator =
+                  (MCMC.Estimates$Infection.Data.Type[k]=="Indicator"),
+                  Age.Group = MCMC.Estimates$Age.Group[k],
+                  Plot=F)
+      )
+ 
+  }
+
+```
+
+```{r}
+
+MCMC.Estimates.AgeStandard = 
+  MCMC.Estimates %>% 
+  mutate(Age.Group = "Standardized",
+         Median = NA,
+         Lower = NA,
+         Upper = NA) %>%
+  unique()
+
+for(i in 1:nrow(MCMC.Estimates.AgeStandard))
+{
+
+  a=filter(MCMC.Estimates,
+           Antigen==MCMC.Estimates.AgeStandard$Antigen[i],
+           Infection.Data.Type == 
+             MCMC.Estimates.AgeStandard$Infection.Data.Type[i],
+           Max.Delay == MCMC.Estimates.AgeStandard$Max.Delay[i]) %>% 
+    arrange(Age.Group) %>% 
+    select(Median,Lower,Upper)
+  
+  MCMC.Estimates.AgeStandard[i,c("Median","Lower","Upper")] =
+    c(colSums(a*census$prop))
+
+}
+
+  MCMC.Estimates = rbind(MCMC.Estimates,
+                         MCMC.Estimates.AgeStandard)
+  
+```
+
+```{r}
+kable(MCMC.Estimates)
+```
+
+# Saving Results:
+
+```{r}
+write.csv(MCMC.Estimates, paste0(location,"Output Data/Malawi_Estimates.csv"),row.names=F)
+
+write.csv(dAll[["HlyE"]], paste0(location,"Output Data/HlyE_Responses_Malawi.csv"),row.names=F)
+```

@@ -1,0 +1,986 @@
+---
+title: "Seroincidence Comparisons"
+author: "Jo Walker"
+date: "11/13/2024"
+output: html_document
+---
+
+```{r, echo=FALSE, message = F}
+knitr::opts_chunk$set(echo = F, warning = F)
+
+#load("~/Downloads/ptcomb.Rdata")
+require(ggplot2)
+require(cowplot)
+library(scales)
+library(EnvStats)
+library(readxl)
+library(gridExtra)
+library(tidyverse)
+library(tidyr)
+library(RColorBrewer)
+theme_set(theme_cowplot())
+options(scipen=10000)
+
+location = "~/Typhoid-Seroincidence/"
+
+# load serology data from each site
+Bangladesh_Data = 
+  read.csv(paste0(location,"Input Data/Bangladesh_Data.csv")) %>%
+  mutate(Country = "Bangladesh",
+         Antigen = as.character(Antigen),
+         Antigen = replace(Antigen,Antigen=="Flic","FliC"),
+         Antigen = as.factor(Antigen)) %>%
+  select(ID, Antigen, Age.Group,
+         logFI.v1, logFI.v2,
+         Country)
+
+Malawi_Data = 
+  read.csv(paste0(location,"Input Data/Malawi_Data.csv")) %>%
+  mutate(Country = "Malawi",
+         Antigen = as.character(Antigen),
+         Antigen = replace(Antigen,Antigen=="Flic","FliC"),
+         Antigen = as.factor(Antigen)) %>%
+  select(ID, Antigen, Age.Group,
+         logFI.v1, logFI.v2,
+         Country)
+
+Nepal_Data = 
+  read.csv(paste0(location,"Input Data/Nepal_Data.csv")) %>%
+  mutate(Country = "Nepal",
+         Antigen = as.character(Antigen),
+         Antigen = replace(Antigen,Antigen=="Flic","FliC"),
+         Antigen = as.factor(Antigen)) %>%
+  select(ID, Antigen, Age.Group,
+         logFI.v1, logFI.v2,
+         Country)
+
+Serology_Data = 
+  rbind(Bangladesh_Data,
+        Malawi_Data,
+        Nepal_Data) %>%
+  mutate(Age.Group = as.character(Age.Group),
+         Age.Group = factor(Age.Group, 
+                          levels =
+                            c("0-4y","5-9y",
+                              "10-14y", "15-29y","30+") 
+                          ),
+    ID = as.character(ID)
+         )
+
+# Load seroincidence estimates
+Bangladesh.Estimates = read.csv(paste0(location,"Output Data/Bangladesh_Estimates.csv")) %>% 
+  mutate(Country = "Bangladesh") 
+
+Nepal.Estimates = read.csv(paste0(location,"Output Data/Nepal_Estimates.csv")) %>% 
+  mutate(Country = "Nepal") 
+
+Malawi.Estimates = read.csv(paste0(location,"Output Data/Malawi_Estimates.csv")) %>% 
+  mutate(Country = "Malawi") 
+
+MCMC.Estimates = 
+  rbind(Bangladesh.Estimates, 
+        Malawi.Estimates,
+        Nepal.Estimates) %>% 
+  mutate(Age.Group = as.character(Age.Group),
+         Antigen = as.character(Antigen),
+         Antigen = replace(Antigen,Antigen=="Flic","FliC"),
+         Antigen = as.factor(Antigen))
+
+MCMC.Estimates$Age.Group = 
+  factor(MCMC.Estimates$Age.Group,
+         levels = c("Standardized",
+         "0-4y","5-9y","10-14y", "15-29y","30+"))
+
+# Load clinical incidence data
+Adjusted.Burden = read.csv(paste0(location,"Input Data/Adjusted_Burden.csv")) %>%
+  mutate(Age.Group = as.character(Age.Group))
+
+Unadjusted.Burden = read.csv(paste0(location,"Input Data/Unadjusted_Burden.csv")) %>%
+  mutate(Age.Group = as.character(Age.Group))
+
+# Load HlyE response data 
+
+HlyE_Responses_Bangladesh =
+  read.csv(paste0(location,"Output Data/HlyE_Responses_Bangladesh.csv")) %>% 
+  mutate(Country = "Bangladesh")
+
+HlyE_Responses_Malawi =
+  read.csv(paste0(location,"Output Data/HlyE_Responses_Malawi.csv")) %>% 
+  mutate(Country = "Malawi")
+
+HlyE_Responses_Nepal =
+  read.csv(paste0(location,"Output Data/HlyE_Responses_Nepal.csv")) %>% 
+  mutate(Country = "Nepal")
+
+HlyE_Responses = 
+  rbind(HlyE_Responses_Bangladesh,
+        HlyE_Responses_Malawi,
+        HlyE_Responses_Nepal)
+
+
+```
+
+```{r}
+# Generating the adjusted/unadjusted burden of enteric fever
+# (typhoid+paratyphoid) using typhoid incidence and the 
+# relative share of typhoid/paratyphoid cases by age/site.
+# There were no paratyphoid cases at the malawi site, so
+# enteric fever incidence = typhoid fever incidence at that site
+
+Bangladesh.Typhoid.Cases = c(359,94,113,57,70,25)
+Bangladesh.Paratyphoid.Cases = c(95,12,24,15,33,11)
+Bangladesh.EntericFever.Cases = 
+  Bangladesh.Typhoid.Cases + 
+  Bangladesh.Paratyphoid.Cases
+Bangladesh.Ratio = 
+  Bangladesh.EntericFever.Cases/Bangladesh.Typhoid.Cases
+
+
+
+Nepal.Typhoid.Cases = c(71,2,12,19,32,6)
+Nepal.Paratyphoid.Cases = c(9,0,3,2,3,1)
+Nepal.EntericFever.Cases = 
+  Nepal.Typhoid.Cases + 
+  Nepal.Paratyphoid.Cases
+Nepal.Ratio = 
+  Nepal.EntericFever.Cases/Nepal.Typhoid.Cases
+  
+
+# Unadjusted Enteric Fever Burden
+Unadjusted.Burden.EntericFever = Unadjusted.Burden
+
+## Bangladesh
+Unadjusted.Burden.EntericFever$Incidence[Unadjusted.Burden.EntericFever$Country=="Bangladesh"] =
+  Unadjusted.Burden$Incidence[Unadjusted.Burden$Country=="Bangladesh"]*Bangladesh.Ratio
+
+Unadjusted.Burden.EntericFever$Lower[Unadjusted.Burden.EntericFever$Country=="Bangladesh"] =
+  Unadjusted.Burden$Lower[Unadjusted.Burden$Country=="Bangladesh"]*Bangladesh.Ratio
+
+Unadjusted.Burden.EntericFever$Upper[Unadjusted.Burden.EntericFever$Country=="Bangladesh"] =
+  Unadjusted.Burden$Upper[Unadjusted.Burden$Country=="Bangladesh"]*Bangladesh.Ratio
+
+## Nepal
+
+Unadjusted.Burden.EntericFever$Incidence[Unadjusted.Burden.EntericFever$Country=="Nepal"] =
+  Unadjusted.Burden$Incidence[Unadjusted.Burden$Country=="Nepal"]*Nepal.Ratio
+
+Unadjusted.Burden.EntericFever$Lower[Unadjusted.Burden.EntericFever$Country=="Nepal"] =
+  Unadjusted.Burden$Lower[Unadjusted.Burden$Country=="Nepal"]*Nepal.Ratio
+
+Unadjusted.Burden.EntericFever$Upper[Unadjusted.Burden.EntericFever$Country=="Nepal"] =
+  Unadjusted.Burden$Upper[Unadjusted.Burden$Country=="Nepal"]*Nepal.Ratio
+
+# Adjusted Enteric Fever Burden
+
+Adjusted.Burden.EntericFever = Adjusted.Burden
+
+## Bangladesh
+Adjusted.Burden.EntericFever$Incidence[Adjusted.Burden.EntericFever$Country=="Bangladesh"] =
+  Adjusted.Burden$Incidence[Adjusted.Burden$Country=="Bangladesh"]*Bangladesh.Ratio
+
+Adjusted.Burden.EntericFever$Lower[Adjusted.Burden.EntericFever$Country=="Bangladesh"] =
+  Adjusted.Burden$Lower[Adjusted.Burden$Country=="Bangladesh"]*Bangladesh.Ratio
+
+Adjusted.Burden.EntericFever$Upper[Adjusted.Burden.EntericFever$Country=="Bangladesh"] =
+  Adjusted.Burden$Upper[Adjusted.Burden$Country=="Bangladesh"]*Bangladesh.Ratio
+
+## Nepal
+Adjusted.Burden.EntericFever$Incidence[Adjusted.Burden.EntericFever$Country=="Nepal"] =
+  Adjusted.Burden$Incidence[Adjusted.Burden$Country=="Nepal"]*Nepal.Ratio
+
+Adjusted.Burden.EntericFever$Lower[Adjusted.Burden.EntericFever$Country=="Nepal"] =
+  Adjusted.Burden$Lower[Adjusted.Burden$Country=="Nepal"]*Nepal.Ratio
+
+Adjusted.Burden.EntericFever$Upper[Adjusted.Burden.EntericFever$Country=="Nepal"] =
+  Adjusted.Burden$Upper[Adjusted.Burden$Country=="Nepal"]*Nepal.Ratio
+
+```
+
+# Seroincidence Estimates
+
+### Figure 1
+
+Each subfigure corresponds to the specific antigen target which was used to classify participants’ infection status when calculating seroincidence. Solid lines denote the median seroincidence (y-axis) in each age group (x-axis). Vertical lines represent the 95% credible intervals of the seroincidence estimates, and dashed lines indicate the adjusted incidence of enteric fever. Green, orange, and purple lines correspond to the Bangladesh, Malawi, and Nepal study sites, respectively.
+
+```{r,fig.width=11,fig.height = 12.5}
+
+data =
+  MCMC.Estimates %>% 
+  filter(Infection.Data.Type == "Indicator",
+         Max.Delay == 150,
+         Age.Group !=  "Standardized")  %>% 
+  full_join(Adjusted.Burden.EntericFever  %>% 
+              filter(Age.Group != "Standardized") %>% 
+              mutate(Age.Group =
+                       factor(Age.Group,
+          levels = c("0-4y","5-9y","10-14y",
+                     "15-29y","30+"))
+          ) %>% 
+            select(-Lower,-Upper),
+            by = c("Country", "Age.Group")
+            ) 
+
+PLOTS = list()
+
+for(i in sort(unique(data$Antigen)))
+{
+  PLOTS[[i]] = 
+  data %>%
+  filter(Antigen == i) %>%
+  ggplot() +
+  geom_line(aes(x = Age.Group,
+                y = Median/1000,
+                col = Country,
+                group = Country),
+            position = position_dodge(width = 0.2)) +
+  geom_linerange(aes(x = Age.Group,
+                ymin = Lower/1000,
+                ymax = Upper/1000,
+                col = Country,
+                group = Country),
+                position = 
+                  position_dodge(width = 0.2)) + 
+    geom_line(aes(x = Age.Group,
+                  y = Incidence/1000,
+                  col = Country,
+                  group = Country),
+              linetype = 2) +
+  coord_cartesian(ylim = c(1,104)) +
+  theme(plot.margin = unit(c(0,0,0,0.5),"cm"),
+        axis.text.y = element_text(size = 12),
+        legend.position = "none",
+        text = element_text(face = "bold")
+        ) + 
+  scale_color_manual(values = 
+                brewer.pal(n=4, 
+                           name = "Dark2")[1:3]) + 
+  labs(x = "",
+       y = "",
+       title = i,
+       col = "") + 
+    scale_y_continuous(breaks = seq(0,100,25))
+}
+
+XLAB = "Age (Years)"
+YLAB = "Median Seroincidence per 100 PY (95% CrI)"
+
+
+
+grid.arrange(PLOTS[[1]] +
+               theme(legend.position = c(0.5,0.9)) +
+               labs(y = YLAB),
+             PLOTS[[2]] + 
+               geom_text(aes(x = 4.5,
+                             y = 100),
+                label = "Adjusted\nEnteric Fever\nIncidence",
+                hjust = "middle",
+                vjust = "top",
+                family = "Arial") + 
+               geom_line(aes(x = X,
+                             y = Y),
+                         lty = 2,
+                         size = 1,
+                         data = 
+                          data.frame(X = c(3.6, 5.4),
+                                      Y = 77)
+                         ),
+             PLOTS[[3]],
+             PLOTS[[4]] +
+               labs(y = YLAB),
+             PLOTS[[5]] + 
+               labs(x = XLAB),
+             PLOTS[[6]] + 
+               labs(x = XLAB),
+             PLOTS[[7]] +
+               labs(y = YLAB,
+                    x = XLAB),
+             nrow = 3, ncol = 3)
+
+```
+
+### Figure 3
+
+Each subfigure corresponds to a different study site. Solid lines represent the median seroincidence based on the HlyE antigen for each age group (left y-axis), and dashed lines represent the adjusted incidence of enteric fever cases (right y-axis). These measures are presented on different scales (compare axis labels) in order to highlight their association with age: seroincidence is highest in the 0-4-year age group and declines relatively gradually with age, while the incidence of enteric fever peaks in older children before rapidly declining to a low level in adults. Vertical lines represent the 95% credible intervals of seroincidence estimates. Green, orange, and purple lines correspond to the Bangladesh, Malawi, and Nepal study sites, respectively. 
+
+```{r,fig.width=12, fig.height=7,eval = T}
+
+Adj.Factor = c("Bangladesh" = 20,
+               "Malawi" = 30,
+               "Nepal" = 10)
+
+data =
+MCMC.Estimates %>% 
+  filter(Antigen == "HlyE",
+         Infection.Data.Type == "Indicator",
+         Max.Delay == 150,
+         Age.Group != "Standardized") %>% 
+   full_join(Adjusted.Burden.EntericFever  %>% 
+               filter(Age.Group != "Standardized")  %>%
+               rename(Incidence.Adjusted = Incidence,
+                      Lower.Adjusted = Lower,
+                      Upper.Adjusted = Upper)
+             ) %>%
+     mutate(Age.Group = factor(Age.Group,
+           levels = c("0-4y","5-9y","10-14y",
+                      "15-29y","30+")),
+           Adjust.Factor = Adj.Factor[Country]
+           )
+
+PLOTS = list()
+COLS = brewer.pal(n=4, name = "Dark2")[1:3]
+names(COLS) = c("Bangladesh","Malawi","Nepal")
+
+for(i in c("Bangladesh","Malawi","Nepal"))
+{
+  PLOTS[[i]] = 
+    data %>% 
+    filter(Country == i) %>%
+      ggplot() +
+  geom_line(aes(x = Age.Group,
+                y = Median/1000,
+                group = Country),
+            col = COLS[i]) + 
+    geom_linerange(aes(x = Age.Group,
+                ymin = Lower/1000,
+                ymax = Upper/1000,
+                group = Country),
+                col = COLS[i]) + 
+   geom_line(aes(x = Age.Group,
+                 y = Adjust.Factor*Incidence.Adjusted/1000,
+                 group = Country),
+             linetype = 2,
+             col = COLS[i]) +
+  labs(x = "Age (Years)", 
+       y = "Median HlyE Seroincidence per 100 Person-Years (95% CrI)",
+       title = i) +
+    geom_text(aes(x = X,
+                y = Y,
+                label = label),
+            hjust = "middle",
+            vjust = "top",
+            family = "Arial",
+            data = data.frame(X = 4.4-0.5,
+                              Y = c(85,93,90),
+                              Country =
+                                c("Bangladesh",
+                                "Malawi",
+                                "Nepal"),
+                              label =
+    c("Seroincidence",
+      "Adjusted\nEnteric Fever\nIncidence",
+      "")) %>% 
+      filter(Country == i)) +
+  theme(legend.position = "none",
+        text = element_text(face = "bold"),
+        plot.margin =
+          unit(c(0,0.75,0,0.75),"cm")) + 
+  coord_cartesian(ylim = c(0,100))  
+  
+}
+
+```
+
+```{r,fig.width=11, fig.height=12}
+grid.arrange(PLOTS[[1]] +
+        geom_line(aes(x=X, y=Y),
+            data = data.frame(X = c(3.7,5.3)-0.5,
+                              Y = 80),
+            lty = 1,size = 1)  +
+  scale_y_continuous(sec.axis =
+              sec_axis(~./Adj.Factor["Bangladesh"],
+                       name="Enteric Fever Cases per 100 Person-Years")),
+
+           PLOTS[[2]] +
+        geom_line(aes(x=X, y=Y),
+            data = data.frame(X = c(3.6,5.4)-0.5,
+                              Y = 80),
+            lty = 2,size = 1)  +
+  scale_y_continuous(sec.axis =
+              sec_axis(~./Adj.Factor["Malawi"],
+                       name="Enteric Fever Cases per 100 Person-Years")),
+  
+           PLOTS[[3]]  +
+  scale_y_continuous(sec.axis =
+              sec_axis(~./Adj.Factor["Nepal"],
+                       name="Enteric Fever Cases per 100 Person-Years")),
+             nrow = 2, 
+             ncol = 2)
+
+```
+
+# HlyE Seroresponse Classification
+
+```{r, fig.height = 4}
+
+PLOTS.A = list()
+PLOTS.B = list()
+PLOTS.C = list()
+
+for(i in sort(unique(HlyE_Responses$Country)))
+{
+
+  data = 
+    HlyE_Responses %>%
+    filter(Country == i)
+  
+  PLOTS.A[[i]] = 
+    data %>% 
+    ggplot() +
+  geom_point(aes(x=Standardized.logFI.v1,
+                   y=Change.Standardized.logFI),
+             col = grey(0.15)) + 
+  labs(x="Standardized IgG, Visit 1",
+       y="Change in Standardized IgG Between Visits",
+       title = paste0(i,":\nAnti-HlyE IgG, Change vs Baseline")) +
+  theme(axis.title = element_text(size = 12),
+        legend.position = "none",
+        text = element_text(face = "bold")
+        ) + 
+  geom_hline(yintercept = 0,    
+             linetype = 2) +
+  coord_cartesian(xlim = c(-5,1.5),
+                  ylim = c(-6, 6)
+                  ) 
+
+  PLOTS.B[[i]] = 
+  data %>%
+  mutate(diff.from.point5 = abs(P.Change-0.5)) %>%
+  arrange(desc(diff.from.point5)) %>%
+  ggplot() +
+  geom_point(aes(x=Standardized.logFI.v1,
+                   y=Change.Standardized.logFI,
+                   col=P.Change
+                 )) + 
+  labs(x="Standardized IgG, Visit 1",
+       y="",
+       title = "\nProbability of a Large IgG Response",
+     colour = "") +
+  theme(axis.title = element_text(size = 12),
+        legend.position = c(0.5, 0.9),
+        legend.direction = "horizontal",
+        legend.key.width = unit(0.9, "cm"),
+        text = element_text(face = "bold")
+        ) + 
+  geom_hline(yintercept = 0,    
+             linetype = 2) +
+  coord_cartesian(xlim = c(-5,1.5),
+                  ylim = c(-6, 6)) + 
+   scale_color_gradient(low="#132B43",
+                        high="#56B1F7",
+                        limits = c(0,1)
+                       )
+
+  n = nrow(data)
+  n.increasing = sum(data$Increasing==1)
+  n.not.increasing = nrow(data) - n.increasing
+  perc.increasing =
+    round(100*sum(data$Increasing==1)/n)
+  perc.not.increasing = 100 - perc.increasing
+  
+  PLOTS.C[[i]] = 
+  data %>% 
+  mutate(Increasing = 
+          ifelse(Increasing==1,
+                 paste0("Infected (n=",n.increasing,", ",perc.increasing,"%)"),
+                 paste0("Not Infected (n=",n.not.increasing,", ",perc.not.increasing,"%)")),
+         Increasing = 
+           factor(Increasing,
+                  levels = c(paste0("Infected (n=",n.increasing,", ",perc.increasing,"%)"), 
+                             paste0("Not Infected (n=",n.not.increasing,", ",perc.not.increasing,"%)")))
+         ) %>%
+  ggplot() +
+  geom_point(aes(x=Standardized.logFI.v1,
+                 y=Change.Standardized.logFI,
+                 col=Increasing
+                 )) + 
+  labs(x="Standardized IgG, Visit 1",
+       y="",
+       title = "\nClassifying Infection Status",
+       colour = ""
+       ) +
+  theme(axis.title = element_text(size = 12),
+        legend.position =
+          c(0.4-0.05,0.95-0.02),
+        legend.direction = "vertical",
+        text = element_text(face = "bold")
+        ) + 
+  geom_hline(yintercept = 0,    
+             linetype = 2) +
+  coord_cartesian(xlim = c(-5,1.5),
+                  ylim = c(-6, 6)) + 
+  scale_color_manual(values = c("#56B1F7","#132B43")) + 
+  guides(colour = 
+           guide_legend(override.aes =
+                          list(size=6.5)))
+  }
+
+
+```
+
+### Supplementary Figure 1
+
+IgG measurements refer to standardized log-transformed fluorescence intensity (see methods). Subfigures in the top, middle, and bottom rows correspond to the Bangladesh, Malawi, and Nepal study sites, respectively. Left: Each point represents the anti-HlyE IgG at baseline (X-axis) and the change in IgG from baseline to the follow-up visit (Y-axis) of a single participant. Most participants are clustered around the horizontal dashed line corresponding to no change in IgG between visits. Middle: Participants are colored by the posterior probability of having a large change (either an increase or decrease) in IgG between visits. This metric is derived from a two-cluster linear regression mixture model. Right: Participants who experienced a large rise in IgG between visits (posterior probability > 0.5) were classified as infected during this period. All other participants were considered to be uninfected. 
+
+```{r, fig.width=13, fig.height=15}
+
+grid.arrange(PLOTS.A[[1]]+ 
+  geom_text(aes(x = -1,
+                y = 5.5,
+                label = paste0("n=",
+                 nrow(HlyE_Responses_Bangladesh),
+                 " participants")),
+            size = 6),
+  PLOTS.B[[1]],PLOTS.C[[1]],
+  
+             PLOTS.A[[2]]+ 
+  geom_text(aes(x = -1,
+                y = 5.5,
+                label = paste0("n=",
+                 nrow(HlyE_Responses_Malawi),
+                 " participants")),
+            size = 6),
+  PLOTS.B[[2]],PLOTS.C[[2]],
+  
+             PLOTS.A[[3]]+ 
+  geom_text(aes(x = -1,
+                y = 5.5,
+                label = paste0("n=",
+                 nrow(HlyE_Responses_Nepal),
+                 " participants")),
+            size = 6),
+  PLOTS.B[[3]],PLOTS.C[[3]],
+             nrow = 3, 
+             ncol = 3)
+```
+
+# Cross-Sectional Antigen Titers
+
+```{r}
+
+Median.Baseline.Titers = 
+  Serology_Data %>% 
+  group_by(Country,Antigen,Age.Group) %>% 
+  dplyr::summarize(Median.logFI = median(logFI.v1),
+                   Lower.logFI = quantile(logFI.v1,0.25),
+                   Upper.logFI = quantile(logFI.v1,0.75))  %>%
+  ungroup() 
+
+```
+
+### Supplementary Figure 2
+
+Each subfigure corresponds to a specific antigen target against which IgG antibodies were measured. Solid lines denote the median of the log10-transformed fluorescence intensity (FI, a proxy for IgG concentration, y-axis) across participant’s baseline samples in each age group (x-axis). Vertical lines represent the interquartile range of the log10(FI) measurements. Green, orange, and purple lines correspond to the Bangladesh, Malawi, and Nepal study sites, respectively. 
+
+```{r, fig.width=9,fig.height=9}
+PLOTS = list()
+
+for(i in sort(unique(Median.Baseline.Titers$Antigen)))
+  {
+  PLOTS[[i]] =  Median.Baseline.Titers %>%
+    filter(Antigen == i) %>%
+  ggplot() +
+  geom_line(aes(x = Age.Group,
+                y = Median.logFI,
+                col = Country,
+                group = Country),
+            position = position_dodge(width = 0.2)
+            ) + 
+    geom_linerange(aes(x = Age.Group,
+                       ymin = Lower.logFI,
+                       ymax = Upper.logFI,
+                       col = Country,
+                       group = Country),
+                   position = position_dodge(width = 0.2)
+                   ) + 
+  labs(x = "",
+       y = "",
+       title = i,
+       col = "") + 
+  theme(legend.position = "none",
+        text = element_text(face = "bold")) +
+  coord_cartesian(ylim =
+                    c(0,
+                      max(Median.Baseline.Titers$Upper.logFI))) + 
+  scale_color_manual(values = 
+                brewer.pal(n=4, 
+                           name = "Dark2")[1:3])
+
+}
+
+YLAB = "Median (IQR) log10(FI)"
+
+grid.arrange(PLOTS[[1]] + 
+               labs(y = YLAB) ,
+             PLOTS[[2]],
+             PLOTS[[3]] +
+               theme(legend.position = c(0.5, 0.4)),
+             PLOTS[[4]] + labs(y = YLAB),
+             PLOTS[[5]] + labs(x = "Age (Years)"),
+             PLOTS[[6]] + labs(x = "Age (Years)"),
+             PLOTS[[7]] + labs(x = "Age (Years)",
+                               y = YLAB),
+             nrow=3, ncol=3)
+
+```
+
+# Intra-participant IgG Correlation vs Different Antigens
+
+### Supplementary Figure 3
+
+This figure displays the Pearson’s correlation coefficient of standardized IgG measurements from the same participant sample for each unique pair of antigen targets. 
+
+```{r,fig.width=9,fig.height=8}
+
+PLOTS = list()
+
+cross_sectional_serology =
+Serology_Data %>% 
+  pivot_longer(cols = c("logFI.v1","logFI.v2"),
+               names_prefix = "logFI.",
+               names_to = "visit") %>%
+  pivot_wider(id_cols=c("Country","ID","visit"),
+              names_from=Antigen,
+              values_from = value) 
+
+cross_sectional_serology.cor = 
+  expand.grid(Country = unique(cross_sectional_serology$Country),
+            Antigen.1 = unique(Serology_Data$Antigen),
+            Antigen.2 = unique(Serology_Data$Antigen),
+            Correlation = NA) %>%
+  mutate(Antigen.1 = as.character(Antigen.1),
+         Antigen.2 = as.character(Antigen.2),
+         Country = as.character(Country))
+
+for(i in 1:nrow(cross_sectional_serology.cor))
+  {
+  cross_sectional_serology.cor$Correlation[i] = 
+  cross_sectional_serology %>% 
+    filter(Country == cross_sectional_serology.cor$Country[i]) %>%
+    select(cross_sectional_serology.cor$Antigen.1[i],
+           cross_sectional_serology.cor$Antigen.2[i]) %>%
+    cor(use="complete.obs") %>%
+    min() %>%
+    round(2)
+  }
+
+
+for(i in sort(unique(cross_sectional_serology.cor$Country)))
+{
+  PLOTS[[i]] = 
+cross_sectional_serology.cor %>%
+    filter(Country == i) %>%
+  arrange(desc(Antigen.1)) %>%
+     filter(!(Antigen.1=="FliC" & Antigen.2 == "CdtB"),
+            !(Antigen.1=="HlyE" & Antigen.2 %in% c("CdtB","FliC")),
+          !(Antigen.1=="LPS02" & Antigen.2 %in% c("FliC","HlyE","CdtB")),
+          !(Antigen.1=="LPS09" & Antigen.2 %in% c("LPS02","CdtB","FliC","HlyE")),
+          !(Antigen.1=="YncE" & Antigen.2 != "YncE"),
+          !(Antigen.1=="Vi" & !Antigen.2 %in% c("Vi","YncE")
+            )
+ ) %>% 
+  ggplot() +
+  geom_raster(aes(x=Antigen.1,
+                  y=Antigen.2,
+                  fill = Correlation)) + 
+  labs(x="Antigen Target",
+       y="Antigen Target",
+       title = i) +
+  scale_fill_gradient2(
+                    limits = c(-1,1)) +
+  geom_text(aes(x=Antigen.1,
+                y=Antigen.2,
+                label=Correlation)) +
+    theme(legend.position = "none")
+  
+}
+
+grid.arrange(PLOTS[[1]],
+             PLOTS[[2]],
+             PLOTS[[3]],
+             PLOTS[[1]]+
+               theme(axis.line = element_blank(),
+                     axis.ticks = element_blank(),
+                     axis.text = element_blank(),
+                     axis.title = element_blank(),
+                     plot.title = element_blank(),
+                     legend.position = c(0.5,0.5),
+                     legend.key.size = unit(1, "cm"),
+                     legend.title = 
+                       element_text(size = 12),
+                     legend.text = 
+                       element_text(size = 14),
+                     panel.background = 
+                       element_rect(fill= "white",
+                                    color = "white"),
+                     legend.direction = "vertical",
+                     panel.ontop = T),
+             nrow = 2,
+             ncol = 2)
+```
+
+# Scatterplot: Seroincidence vs Clinical Incidence
+
+```{r,fig.height = 10, fig.width=11}
+
+Correlation = 
+  data.frame(Antigen =
+         sort(unique(MCMC.Estimates$Antigen)),
+             r.Unadjusted = NA,
+             r.Adjusted = NA,
+             r.Unadjusted.NoNepal = NA,
+             r.Adjusted.NoNepal = NA,
+             r.Unadjusted.No0to4 = NA,
+             r.Adjusted.No0to4 = NA,
+             intercept.Unadjusted = NA,
+             intercept.Adjusted = NA,
+             slope.Unadjusted = NA,
+             slope.Adjusted = NA
+            ) 
+
+PLOTS.unadjusted = list()
+PLOTS.adjusted = list()
+
+  d = MCMC.Estimates %>%
+      filter(
+         Age.Group != "Standardized",
+         Infection.Data.Type == "Indicator",
+         Max.Delay == 150) %>% 
+  select(Age.Group, Antigen, Country, Median) %>%
+    full_join(
+      Unadjusted.Burden.EntericFever %>%
+        filter(Age.Group != "Standardized") %>%
+        select(Country, Age.Group, Incidence) %>%
+        rename("Incidence.Unadjusted" = "Incidence"),
+      by = c("Country","Age.Group")
+    ) %>%
+   full_join(
+     Adjusted.Burden.EntericFever %>%
+       filter(Age.Group != "Standardized") %>%
+       select(Country, Age.Group, Incidence) %>%
+       rename("Incidence.Adjusted" = "Incidence"),
+     by = c("Country","Age.Group")
+    ) %>% 
+      mutate(Age.Group =
+               as.character(Age.Group),
+             Age.Group = factor(Age.Group, 
+                                levels =                    c("0-4y","5-9y","10-14y","15-29y","30+")))
+    
+for(i in 1:nrow(Correlation))
+  {
+    Correlation$r.Adjusted[i] = 
+     filter(d, 
+            Antigen == Correlation$Antigen[i]) %>% 
+     select(Median, Incidence.Adjusted) %>% 
+     cor() %>% 
+     min()
+
+    Correlation$r.Unadjusted[i] = 
+     filter(d, 
+            Antigen == Correlation$Antigen[i]) %>% 
+     select(Median, Incidence.Unadjusted) %>% 
+     cor() %>% 
+     min()
+    
+    Correlation$r.Adjusted.NoNepal[i] = 
+     filter(d, 
+            Antigen == Correlation$Antigen[i],
+            Country != "Nepal") %>% 
+     select(Median, Incidence.Adjusted) %>% 
+     cor() %>% 
+     min()
+
+    Correlation$r.Unadjusted.NoNepal[i] = 
+     filter(d, 
+            Antigen == Correlation$Antigen[i],
+            Country != "Nepal") %>% 
+     select(Median, Incidence.Unadjusted) %>% 
+     cor() %>% 
+     min()
+    
+    Correlation$r.Adjusted.No0to4[i] = 
+     filter(d, 
+            Antigen == Correlation$Antigen[i],
+            Age.Group != "0-4y") %>% 
+     select(Median, Incidence.Adjusted) %>% 
+     cor() %>% 
+     min()
+
+    Correlation$r.Unadjusted.No0to4[i] = 
+     filter(d, 
+            Antigen == Correlation$Antigen[i],
+            Age.Group != "0-4y") %>% 
+     select(Median, Incidence.Unadjusted) %>% 
+     cor() %>% 
+     min()
+    
+    model.Adjusted = 
+      glm(Incidence.Adjusted ~ Median,
+                         data = d %>% 
+        filter(Antigen == Correlation$Antigen[i]))
+  
+    model.Unadjusted = 
+      glm(Incidence.Unadjusted ~ Median,
+                         data = d %>% 
+        filter(Antigen == Correlation$Antigen[i]))
+    
+    Correlation$intercept.Unadjusted[i] = 
+      model.Unadjusted$coefficients[1]
+    
+    Correlation$intercept.Adjusted[i] = 
+      model.Adjusted$coefficients[1]
+
+    Correlation$slope.Unadjusted[i] = 
+      model.Unadjusted$coefficients[2]
+    
+    Correlation$slope.Adjusted[i] = 
+      model.Adjusted$coefficients[2]
+
+    PLOTS.unadjusted[[i]] = 
+      d %>%
+      filter(Antigen == Correlation$Antigen[i]) %>%
+      ggplot() + 
+      geom_point(aes(x = Median/1000,
+                 y = Incidence.Unadjusted/1000,
+                 col = Country,
+                 shape = Age.Group
+                 )) +
+  labs(x = "Seroincidence per 100 Person-Years",
+       y = "Enteric Fever Cases per 100 Person-Years",
+       shape = "Study Site:",
+       col = "Age (Years):",
+       title = paste0(Correlation$Antigen[i],": r = ",
+             round(Correlation$r.Unadjusted[i],2))) +
+    geom_abline(intercept =
+         Correlation$intercept.Unadjusted[i]/1000,
+                  slope =
+           Correlation$slope.Unadjusted[i],
+              linetype = 2) +
+  coord_cartesian(xlim =
+                    c(0,max(d$Median)/1000),
+                  ylim = c(0,
+                max(d$Incidence.Unadjusted/1000))) + 
+      theme(legend.position = "none",
+            axis.title = 
+              element_text(size = 12),
+            axis.title.y = 
+              element_text(size = 11),
+            plot.margin =
+              unit(c(0,0.5,0,0),"cm"),
+            text = element_text(face = "bold")) + 
+      scale_y_continuous(breaks =
+                           c(0,0.25,0.5)) + 
+  scale_color_manual(values = 
+                brewer.pal(n=4, 
+                           name = "Dark2")[1:3])
+    
+    
+    
+    PLOTS.adjusted[[i]] = d %>%
+      filter(Antigen == Correlation$Antigen[i]) %>%
+      ggplot() + 
+  geom_point(aes(x = Median/1000,
+                 y = Incidence.Adjusted/1000,
+                 col = Country,
+                 shape = Age.Group)) +
+  labs(x = "Seroincidence per 100 Person-Years",
+       y = "Enteric Fever Cases per 100 Person-Years",
+       shape = "Study Site:",
+       col = "Age (Years):",
+       title = paste0(Correlation$Antigen[i],": r = ",
+             round(Correlation$r.Adjusted[i],2))) +
+    geom_abline(intercept =
+         Correlation$intercept.Adjusted[i]/1000,
+                  slope =
+           Correlation$slope.Adjusted[i],
+              linetype = 2) +
+  coord_cartesian(xlim = c(0,max(d$Median)/1000),
+                  ylim = c(0,
+                max(d$Incidence.Adjusted/1000))) + 
+      theme(legend.position = "none",
+            axis.title = 
+              element_text(size = 12),
+            axis.title.y = 
+              element_text(size = 11),
+            plot.margin = unit(c(0,0.5,0,0),"cm"),
+            text = element_text(face = "bold")) + 
+  scale_color_manual(values = 
+                brewer.pal(n=4, 
+                           name = "Dark2")[1:3])
+  }
+
+    Correlation %>% 
+      select(Antigen, 
+             r.Unadjusted,
+             r.Unadjusted.NoNepal,
+             r.Adjusted, 
+             r.Adjusted.NoNepal) %>%
+      mutate(r.Unadjusted = 
+               round(r.Unadjusted,2),
+             r.Unadjusted.NoNepal =
+               round(r.Unadjusted.NoNepal,2),
+             r.Adjusted = 
+               round(r.Adjusted,2),
+             r.Adjusted.NoNepal = 
+               round(r.Adjusted.NoNepal,2)
+             )
+```
+
+### Supplementary Figure 4
+
+Each subfigure corresponds to the specific antigen target which was used to classify participants’ infection status when calculating seroincidence. Each point corresponds to an age group (shape) at a given study site (color). The position of each point represents the seroincidence (x-axis) and unadjusted enteric fever incidence (y-axis) for that age group and study site during the study period. The linear relationship between seroincidence and enteric fever incidence is indicated by a dashed line of best fit and the Pearson’s correlation coefficient (r) at the top of the subfigure.
+
+```{r,fig.height = 10, fig.width=11}
+
+grid.arrange(PLOTS.unadjusted[[1]] + labs(x = ""),
+             PLOTS.unadjusted[[2]] + labs(x="",y=""),
+             PLOTS.unadjusted[[3]] + labs(x="",y=""),
+             PLOTS.unadjusted[[4]] + labs(x = ""),
+             PLOTS.unadjusted[[5]]  + labs(y = ""),
+             PLOTS.unadjusted[[6]]  + labs(y = ""),
+             PLOTS.unadjusted[[7]] +
+               theme(legend.position = "none"),
+             PLOTS.unadjusted[[7]] +
+               coord_cartesian(xlim = c(100,200),
+                               ylim = c(-5,-4)) + 
+               labs(title = "", y = "") + 
+               theme(axis.title = element_blank(),
+                     axis.text = element_blank(),
+                     axis.line = element_blank(),
+                     axis.ticks = element_blank(),
+                 legend.position =
+                            c(0.25,0.75),
+                          legend.direction = 
+                            "horizontal"),
+             nrow = 3, ncol = 3)
+
+```
+
+### Supplementary Figure 5 
+
+Each subfigure corresponds to the specific antigen target which was used to classify participants’ infection status when calculating seroincidence. Each point corresponds to an age group (shape) at a given study site (color). The position of each point represents the seroincidence (x-axis) and adjusted enteric fever incidence (y-axis) for that age group and study site during the study period. The linear relationship between seroincidence and enteric fever incidence is indicated by a dashed line of best fit and the Pearson’s correlation coefficient (r) at the top of the subfigure.
+
+```{r,fig.height = 10, fig.width=11}
+
+grid.arrange(PLOTS.adjusted[[1]] + labs(x = ""),
+             PLOTS.adjusted[[2]] + labs(x="",y=""),
+             PLOTS.adjusted[[3]] + labs(x="",y=""),
+             PLOTS.adjusted[[4]] + labs(x = ""),
+             PLOTS.adjusted[[5]]  + labs(y = ""),
+             PLOTS.adjusted[[6]]  + labs(y = ""),
+             PLOTS.adjusted[[7]] +
+               theme(legend.position = "none"),
+             PLOTS.adjusted[[7]] +
+               coord_cartesian(xlim = c(100,200),
+                               ylim = c(-5,-4)) + 
+               labs(title = "", y = "") + 
+               theme(axis.title = element_blank(),
+                     axis.text = element_blank(),
+                     axis.line = element_blank(),
+                     axis.ticks = element_blank(),
+                 legend.position =
+                            c(0.25,0.75),
+                          legend.direction = 
+                            "horizontal"),
+             nrow = 3, ncol = 3)
+```
+
